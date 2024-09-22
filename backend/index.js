@@ -2,6 +2,7 @@ const express = require('express')
 const dbConnect = require('./config/dbConnect')
 const authRoute = require('./routers/userRoute')
 const bodyParser = require('body-parser')
+const cookieParser = require('cookie-parser')
 const { notFound, errorHandler } = require('./middlewares/errorHandler')
 const app = express()
 const dotenv = require('dotenv').config()
@@ -11,6 +12,7 @@ dbConnect().catch(console.dir)
 
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: false}))
+app.use(cookieParser())
 
 // get api for register and login
 app.use('/api/user/', authRoute)
