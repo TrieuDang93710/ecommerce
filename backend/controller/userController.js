@@ -4,6 +4,8 @@ const asyncHandler = require('express-async-handler')
 const { validateMongoDbId } = require('../utils/validateMongodbId')
 const { generateRefreshToken } = require('../config/refreshToken')
 const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
+const { sendEmail } = require('./emailController')
 
 const createUser = asyncHandler(async (req, res) => {
     const email = req.body.email
@@ -34,7 +36,7 @@ const loginUser = asyncHandler(async (req, res) => {
         )
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
-            maxAge: 24 * 60 * 60 * 1000
+            maxAge: 72 * 60 * 60 * 1000
         })
         res.json({
             _id: findUser?._id,
@@ -71,7 +73,8 @@ const logout = asyncHandler(async (req, res) => {
     const cookie = req.cookies
     if (!cookie?.refreshToken) throw new Error('No refresh token in cookies.')
     const refreshToken = cookie.refreshToken
-    const user = await User.findOne({ refreshToken : refreshToken })
+    const user = await User.findOne({ refreshToken: refreshToken })
+    console.log(user)
     if (!user) {
         res.clearCookie('refreshToken', {
             httpOnly: true,
@@ -79,7 +82,7 @@ const logout = asyncHandler(async (req, res) => {
         })
         return res.sendStatus(204)
     }
-    await User.findByIdAndUpdate({refreshToken: ''})
+    await User.findByIdAndUpdate(user?._id, { refreshToken: '' })
     res.clearCookie('refreshToken', {
         httpOnly: true,
         secure: true,
@@ -89,7 +92,7 @@ const logout = asyncHandler(async (req, res) => {
 
 const updateUser = asyncHandler(async (req, res, next) => {
     try {
-        const { id } = req.params
+        const { id } = req.user
         validateMongoDbId(id)
         const body = {
             firstName: req?.body?.firstName,
@@ -127,7 +130,8 @@ const getAllUser = asyncHandler(async (req, res) => {
 
 const getAUser = asyncHandler(async (req, res) => {
     try {
-        const { id } = req.params
+        const { id } = req.user
+        console.log(id)
         validateMongoDbId(id)
         const getaUser = await User.findById(id)
         res.json({ getaUser })
@@ -149,7 +153,7 @@ const deleteUser = asyncHandler(async (req, res) => {
 
 const blockedUser = asyncHandler(async (req, res) => {
     try {
-        const { id } = req.params
+        const { id } = req.user
         validateMongoDbId(id)
         const blockedUr = await User.findByIdAndUpdate(
             id,
@@ -169,7 +173,7 @@ const blockedUser = asyncHandler(async (req, res) => {
 
 const unBlockedUser = asyncHandler(async (req, res) => {
     try {
-        const { id } = req.params
+        const { id } = req.user
         validateMongoDbId(id)
         const unblockedUr = await User.findByIdAndUpdate(
             id,
@@ -187,5 +191,81 @@ const unBlockedUser = asyncHandler(async (req, res) => {
     }
 })
 
+const updatePassword = asyncHandler(async (req, res, next) => {
+    const { _id } = req.user
+    const password = req.body
+    validateMongoDbId(_id)
+    const user = await User.findById(_id)
+    if (password) {
+        user.password = password
+        console.log(user.password)
+        const updPassword = await user.save()
+        console.log(updPassword)
+        // console.log('user after update', user)
+        // res.json(updPassword)
+    } else {
+        res.json(user)
+    }
+})
 
-module.exports = { createUser, loginUser, getAllUser, getAUser, deleteUser, updateUser, blockedUser, unBlockedUser, handleRefreshToken, logout }
+const forgotPasswordToken = asyncHandler(async (req, res, next) => {
+    const { email } = req.body
+    console.log(email)
+    const user = await User.findOne({ email })
+    if (!email) {
+        throw new Error('User not found with this email')
+    }
+    try {
+        const token = await user.createPasswordResetToken()
+        await user.save()
+        const resetURL = `Hi, Please follow the link to reset your password. This link is valid till 10 minutes from now. 
+        <a href='http://localhost:3000/api/user/reset-password/'>Click Here</a>
+        `
+        const data = {
+            to: email,
+            text: 'Hi User',
+            subject: 'Forgot password link',
+            html: resetURL
+        }
+        sendEmail(data)
+        res.json(token)
+    } catch (error) {
+        throw new Error(error)
+    }
+})
+
+const resetPassword = asyncHandler(async (req, res) => {
+    const password = req.body
+    const token = req.params
+    const hashToken = crypto.createHash('sha256').update(resetToken).digest('hex')
+    const user = await User.findOne({
+        passwordResetToken: hashToken,
+        passwordResetExpires: { $gt: Date.now() }
+    })
+    if (!user) {
+        throw new Error('Token expires. Please try again latter.')
+    }
+    user.password = password
+    user.passwordResetToken = undefined
+    user.passwordResetExpires = undefined
+
+    await user.save()
+    
+    res.json(user)
+})
+
+module.exports = {
+    createUser,
+    loginUser,
+    getAllUser,
+    getAUser,
+    deleteUser,
+    updateUser,
+    blockedUser,
+    unBlockedUser,
+    handleRefreshToken,
+    logout,
+    updatePassword,
+    forgotPasswordToken,
+    resetPassword
+}
